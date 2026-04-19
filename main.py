@@ -95,15 +95,10 @@ parts = [
     "left_knee", "right_knee", "left_ankle", "right_ankle"
 ]
 
-COCO_SKELETON_0_INDEXED = [
-    (1, 0), (2, 0),
-    (3, 1), (4, 2),
-    (5, 6),
-    (5, 7), (6, 8),
-    (7, 9), (8, 10),
-    (5, 11), (6, 12),
-    (11, 13), (12, 14),
-    (13, 15), (14, 16)
+skeleton_edges = [
+    [0, 1], [0, 2], [1, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5,6], [5, 7], 
+    [5, 11], [6, 12], [6, 8], [7, 9], [8, 10], [11, 12], [13, 11], 
+    [14, 12], [15, 13], [16, 14]
 ]
 
 # Keypoint R-CNN
@@ -415,7 +410,7 @@ def draw_skeleton(frame, kp, label):
     KP   = (255, 210,  50)
     edge = GOOD if label == "Good" else (BAD if label == "Bad" else (120, 140, 180))
 
-    for i, j in COCO_SKELETON_0_INDEXED:
+    for i, j in skeleton_edges:
         xi, yi, vi = kp[i]; xj, yj, vj = kp[j]
         if vi > 0.9 and vj > 0.9:
             cv2.line(frame, (int(xi), int(yi)), (int(xj), int(yj)),
@@ -537,7 +532,7 @@ if st.session_state.running:
                 last_kps = kp
                 if posture_model is not None:
                     try:
-                        input = build_input(kp, W, H)
+                        input = build_input(kp, index_model, device)
                         input = input.to(device)
                         lbl, conf  = prediction(posture_model, input)
                         last_label = lbl
