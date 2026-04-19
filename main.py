@@ -202,7 +202,58 @@ def load_posture_model(path: str, index_model: int):
             net.to(device).eval()
             return net
         case 2:
-            return None
+            class CNN1d(nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                    self.conv1 = nn.Conv1d(in_channels=3, out_channels=32, kernel_size=3, padding=1)
+                    self.bn1 = nn.BatchNorm1d(32)
+                    self.pool1 = nn.MaxPool1d(kernel_size=2)
+
+                    self.spatial_dropout1 = nn.Dropout1d(p=0.2)
+
+                    self.conv2 = nn.Conv1d(in_channels=32, out_channels=64, kernel_size=3, padding=1)
+                    self.bn2 = nn.BatchNorm1d(64)
+                    self.pool2 = nn.MaxPool1d(kernel_size=2)
+
+                    self.spatial_dropout2 = nn.Dropout1d(p=0.2)
+
+                    self.global_avg_pool = nn.AdaptiveAvgPool1d(1)
+
+                    self.fc1 = nn.Linear(64, 32)
+                    self.dropout = nn.Dropout(p=0.6)
+                    self.fc2 = nn.Linear(32, 1)
+
+                def forward(self, x):
+                    x = self.conv1(x)
+                    x = self.bn1(x)
+                    x = F.relu(x)
+                    x = self.pool1(x)
+
+                    x = self.spatial_dropout1(x)
+
+                    x = self.conv2(x)
+                    x = self.bn2(x)
+                    x = F.relu(x)
+                    x = self.pool2(x)
+
+                    x = self.spatial_dropout2(x)
+
+                    x = self.global_avg_pool(x)
+                    x = torch.flatten(x, 1)
+
+                    x = self.fc1(x)
+                    x = F.relu(x)
+                    x = self.dropout(x)
+
+                    x = self.fc2(x)
+
+                    return x
+                
+            net = CNN1d()
+            net.load_state_dict(torch.load(path, map_location=device))
+            net.to(device).eval()
+            return net
         case 3:
             return None
 
@@ -299,6 +350,10 @@ def build_input(kp: np.ndarray, index_model: int, device):
         # Create PyG Data object
         data = Data(x=norm_tensor, edge_index=edge_index)
         return data.to(device)
+    
+    elif index_model == 2:
+        cnn_input = norm_tensor.transpose(0, 1).unsqueeze(0)
+        return cnn_input.to(device)
 
 def prediction(model, data):
     """
@@ -363,7 +418,8 @@ with st.sidebar:
     # !!!!!!!!!!!!!!! Add ur model path here
     model_list = [
         "mlp_latest_norm_best_model.pth",
-        "gcn_model.pth"
+        "gcn_model.pth",
+        "1dcnn_best_model.pth"
     ]
     model_path = st.selectbox(
         "Change model here:",
