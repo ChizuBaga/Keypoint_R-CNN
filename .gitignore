@@ -53,4 +53,7 @@ $RECYCLE.BIN/
 
 #Own
 sitting-posture-keyjoint-dataset/
-mlp_best_model.pth
+mlp_batch_model.pth
+mlp_2layer_model.pth
+mlp_dropout_model.pth
+mlp_norm_best_model.pth

@@ -144,8 +144,54 @@ def load_posture_model(path: str, index_model: int):
             net.to(device).eval()
             return net
         case 1:
-            return None
-        case 2:
+            #Add Dropout???
+            class MLP2(nn.Module):
+                def __init__(self):
+                    """
+                    Create a Fully Connected Neuron Network
+
+                    """
+                    super().__init__()
+                    self.layer1 = nn.Sequential(
+                        nn.Linear(in_features=34, out_features=128),
+                        nn.BatchNorm1d(128),
+                        nn.LeakyReLU(0.1),
+                        nn.Dropout(0.5),
+                    )
+                    self.layer2 = nn.Sequential(
+                        nn.Linear(in_features=128, out_features=64),
+                        nn.BatchNorm1d(64),
+                        nn.LeakyReLU(0.1),
+                        nn.Dropout(0.2)
+                    )
+                    self.layer3 = nn.Sequential(
+                        nn.Linear(in_features=64, out_features=32),
+                        nn.BatchNorm1d(32),
+                        nn.LeakyReLU(0.1),
+                        nn.Dropout(0.2)
+                    )
+                    self.outputlayer = nn.Linear(in_features=32, out_features=1)
+                    self.sigmoid = nn.Sigmoid()
+
+                def forward(self, x):
+                    """
+                    To perform inference (do prediction).
+                    During training mode, this will construct the computational graph
+                    """
+                    # perform forward propagation and build computational graph
+                    x = self.layer1(x)
+                    x = self.layer2(x)
+                    x = self.layer3(x)
+                    x = self.outputlayer(x)
+                    x = self.sigmoid(x)
+
+                    return x
+                
+            net = MLP2()
+            net.load_state_dict(torch.load(path, map_location=device))
+            net.to(device).eval()
+            return net
+        case 2:            
             return None
         case 3:
             return None
@@ -171,17 +217,69 @@ def extract_keypoint(img, model, device):
 
     return kp[best].detach().cpu().numpy()
 
-# Build input for model
+def normalize_coco_posture_safe(pos_tensor):
+    """
+    Safely normalizes a [17, 2] COCO keypoint tensor, ignoring -1.0 missing values.
+    """
+    # Clone to avoid modifying the original data in-place
+    norm_pos = pos_tensor.clone()
+    
+    # 1. Create a Boolean Mask for valid points
+    # (Assuming if X is -1.0, the whole joint is missing)
+    valid_mask = norm_pos[:, 0] != -1.0 
+    
+    # If the skeleton is entirely missing (all -1.0), return as-is
+    if not valid_mask.any():
+        return norm_pos
+
+    # 2. Safe Mid-Hip Calculation with Fallbacks
+    l_hip_valid = valid_mask[11].item()
+    r_hip_valid = valid_mask[12].item()
+    
+    if l_hip_valid and r_hip_valid:
+        root = (norm_pos[11] + norm_pos[12]) / 2.0
+    elif l_hip_valid:
+        root = norm_pos[11]  # Fallback to Left Hip only
+    elif r_hip_valid:
+        root = norm_pos[12]  # Fallback to Right Hip only
+    else:
+        # Emergency Fallback: If both hips are missing, try the Shoulders (5, 6)
+        l_sho_valid = valid_mask[5].item()
+        r_sho_valid = valid_mask[6].item()
+        if l_sho_valid and r_sho_valid:
+            root = (norm_pos[5] + norm_pos[6]) / 2.0
+        else:
+            root = torch.tensor([0.0, 0.0]) # Give up centering, just scale it
+
+    # 3. Apply Centering ONLY to valid points
+    # The -1.0 points remain entirely untouched
+    norm_pos[valid_mask] = norm_pos[valid_mask] - root
+    
+    # 4. Aspect-Preserving Scale ONLY on valid points
+    min_vals = norm_pos[valid_mask].min(dim=0)[0]
+    max_vals = norm_pos[valid_mask].max(dim=0)[0]
+    ranges = max_vals - min_vals
+    global_scale = ranges.max()
+    
+    # Scale valid points. Add epsilon to prevent division by zero
+    norm_pos[valid_mask] = norm_pos[valid_mask] / (global_scale + 1e-6)
+    
+    return norm_pos
+
+# Build input for model -- Normalize ipnut
 def build_input(kp: np.ndarray, W: int, H: int):
     """
     kp : (17, 3) pixel coords (x,y,v) -> 34 keypoint, v ignore
+    return ()
     """
-    import torch
-    xy = kp[:, :2].copy()
-    xy[:, 0] /= W
-    xy[:, 1] /= H
-    xy = xy.flatten()
-    return torch.tensor(xy, dtype=torch.float32).unsqueeze(0)
+    # xy = kp[:, :2]
+    xy_tensor = torch.tensor(kp)[:, :2]
+    norm_xy = normalize_coco_posture_safe(xy_tensor.float())
+    # xy[:, 0] /= W
+    # xy[:, 1] /= H
+    # xy = xy.flatten()
+    # return torch.tensor(xy, dtype=torch.float32).unsqueeze(0)
+    return torch.tensor(norm_xy.flatten(), dtype=torch.float32).detach().unsqueeze(0)
 
 # Posture prediction
 def prediction(model, data):
@@ -231,9 +329,8 @@ with st.sidebar:
     st.divider()
     # !!!!!!!!!!!!!!! Add ur model path here
     model_list = [
-        "mlp_best_model.pth",
-        "mlp_dropout_model.pth", #DEBUG
-        "mlp_2layer_model.pth" #DEBUG
+        "mlp_batch_model.pth",
+        "mlp_norm_best_model.pth"
     ]
     model_path = st.selectbox(
         "Change model here:",
