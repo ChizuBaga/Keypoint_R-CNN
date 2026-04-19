@@ -1,0 +1,537 @@
+import streamlit as st
+import cv2
+import numpy as np
+import time
+import os
+import torch
+import torch.nn as nn
+import torch
+import torchvision.transforms.functional as F
+from torchvision.models.detection import (
+    keypointrcnn_resnet50_fpn,
+    KeypointRCNN_ResNet50_FPN_Weights,
+)
+
+# CUDA / CPU
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# wEB config
+st.set_page_config(
+    page_title="Sitting Posture Classification",
+    page_icon="🧘",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+############################ 
+# Generated from Claude
+############################
+# CSS
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+
+html, body, [class*="css"] { font-family: 'Syne', sans-serif; }
+.stApp { background: white; color: black; }
+section[data-testid="stSidebar"] {
+  border-right: 1px solid #181d28;
+}
+
+.status-good {
+  border: 1.5px solid #22c55e;
+  border-radius: 14px; padding: 20px 28px;
+  text-align: center; font-size: 1.6rem; font-weight: 800;
+  color: #22c55e; letter-spacing: 3px; text-transform: uppercase;
+  box-shadow: 0 0 40px rgba(34,197,94,.15), inset 0 0 40px rgba(34,197,94,.04);
+}
+.status-bad {
+  border: 1.5px solid #ef4444;
+  border-radius: 14px; padding: 20px 28px;
+  text-align: center; font-size: 1.6rem; font-weight: 800;
+  color: #ef4444; letter-spacing: 3px; text-transform: uppercase;
+  box-shadow: 0 0 40px rgba(239,68,68,.15), inset 0 0 40px rgba(239,68,68,.04);
+}
+.status-idle {
+  border: 1px solid #1e2535;
+  border-radius: 14px; padding: 20px 28px;
+  text-align: center; font-size: 1rem; color: #4b5568; letter-spacing: 1px;
+}
+.card {
+  border: 1px solid #181d28;
+  border-radius: 10px; padding: 14px 18px; margin: 5px 0;
+}
+.card-label { font-size:.68rem;  letter-spacing:2px; text-transform:uppercase; margin-bottom:4px; }
+.card-value { font-family:'JetBrains Mono',monospace; font-size:1.5rem; font-weight:600; }
+.bar-bg { border-radius:4px; height:6px; margin-top:8px; overflow:hidden; }
+.bar-fill { height:100%; border-radius:4px; }
+.kp-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:3px; margin-top:6px; }
+.kp-chip {
+  border:1px solid #181d28; border-radius:5px;
+  padding:3px 7px; font-family:'JetBrains Mono',monospace;
+  font-size:.6rem; color:#6b7a99; white-space:nowrap;
+}
+.kp-chip.active { border-color:#2563eb; color:#93c5fd; }
+.stat-row { display:flex; gap:8px; margin-top:4px; }
+.stat-pill { flex:1; border-radius:8px; padding:10px 8px; text-align:center; font-size:.7rem; letter-spacing:1px; text-transform:uppercase; }
+.stat-good { background:#071a0f; border:1px solid #166534; color:#4ade80; }
+.stat-bad  { background:#1a0707; border:1px solid #991b1b; color:#f87171; }
+.block-container { padding-top:1.2rem; padding-bottom:.5rem; }
+#MainMenu, footer { visibility:hidden; }
+</style>
+""", unsafe_allow_html=True)
+############################ 
+# End
+############################
+
+# COCO keypoint
+parts = [
+    "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+    "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+    "left_wrist", "right_wrist", "left_hip", "right_hip",
+    "left_knee", "right_knee", "left_ankle", "right_ankle"
+]
+
+COCO_SKELETON_0_INDEXED = [
+    (1, 0), (2, 0),
+    (3, 1), (4, 2),
+    (5, 6),
+    (5, 7), (6, 8),
+    (7, 9), (8, 10),
+    (5, 11), (6, 12),
+    (11, 13), (12, 14),
+    (13, 15), (14, 16)
+]
+
+# Keypoint R-CNN
+def load_detector():
+    model  = keypointrcnn_resnet50_fpn(
+        weights=KeypointRCNN_ResNet50_FPN_Weights.DEFAULT
+    )
+    model.to(device).eval()
+    return model
+
+# Load sitting posture model
+def load_posture_model(path: str, index_model: int):
+
+    match index_model:
+        # MLP
+        case 0:
+            # DEBUG: Change network
+            class MLP(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.layer1 = nn.Sequential(
+                        nn.Linear(in_features=34, out_features=64),
+                        nn.BatchNorm1d(64),
+                        nn.ReLU()
+                    )
+                    self.layer2 = nn.Sequential(
+                        nn.Linear(in_features=64, out_features=32),
+                        nn.BatchNorm1d(32),
+                        nn.ReLU()
+                    )
+                    self.outputlayer = nn.Linear(in_features=32, out_features=1)
+                    self.sigmoid = nn.Sigmoid()
+
+                def forward(self, x):
+                    x = self.layer1(x)
+                    x = self.layer2(x)
+                    x = self.outputlayer(x)
+                    return self.sigmoid(x)
+    
+            net = MLP()
+            net.load_state_dict(torch.load(path, map_location=device))
+            net.to(device).eval()
+            return net
+        case 1:
+            #Add Dropout???
+            class MLP2(nn.Module):
+                def __init__(self):
+                    """
+                    Create a Fully Connected Neuron Network
+
+                    """
+                    super().__init__()
+                    self.layer1 = nn.Sequential(
+                        nn.Linear(in_features=34, out_features=128),
+                        nn.BatchNorm1d(128),
+                        nn.LeakyReLU(0.1),
+                        nn.Dropout(0.5),
+                    )
+                    self.layer2 = nn.Sequential(
+                        nn.Linear(in_features=128, out_features=64),
+                        nn.BatchNorm1d(64),
+                        nn.LeakyReLU(0.1),
+                        nn.Dropout(0.2)
+                    )
+                    self.layer3 = nn.Sequential(
+                        nn.Linear(in_features=64, out_features=32),
+                        nn.BatchNorm1d(32),
+                        nn.LeakyReLU(0.1),
+                        nn.Dropout(0.2)
+                    )
+                    self.outputlayer = nn.Linear(in_features=32, out_features=1)
+                    self.sigmoid = nn.Sigmoid()
+
+                def forward(self, x):
+                    """
+                    To perform inference (do prediction).
+                    During training mode, this will construct the computational graph
+                    """
+                    # perform forward propagation and build computational graph
+                    x = self.layer1(x)
+                    x = self.layer2(x)
+                    x = self.layer3(x)
+                    x = self.outputlayer(x)
+                    x = self.sigmoid(x)
+
+                    return x
+                
+            net = MLP2()
+            net.load_state_dict(torch.load(path, map_location=device))
+            net.to(device).eval()
+            return net
+        case 2:            
+            return None
+        case 3:
+            return None
+
+# Extraction keypoint 
+def extract_keypoint(img, model, device):
+    """
+    Returns (17,3) ndarray ==> [x, y, visibility].
+    """
+    img_for_drawing = F.to_tensor(img).unsqueeze(0).to(device)
+
+    with torch.no_grad():
+        output = model(img_for_drawing)[0]
+
+    kp = output["keypoints"]
+    scores = output["scores"].cpu().numpy()
+    if len(scores) == 0:
+        return None
+
+    best = int(np.argmax(scores)) # Highest scores
+    if scores[best] < 0.9:
+        return None # No human detected
+
+    return kp[best].detach().cpu().numpy()
+
+def normalize_coco_posture_safe(pos_tensor):
+    """
+    Safely normalizes a [17, 2] COCO keypoint tensor, ignoring -1.0 missing values.
+    """
+    # Clone to avoid modifying the original data in-place
+    norm_pos = pos_tensor.clone()
+    
+    # 1. Create a Boolean Mask for valid points
+    # (Assuming if X is -1.0, the whole joint is missing)
+    valid_mask = norm_pos[:, 0] != -1.0 
+    
+    # If the skeleton is entirely missing (all -1.0), return as-is
+    if not valid_mask.any():
+        return norm_pos
+
+    # 2. Safe Mid-Hip Calculation with Fallbacks
+    l_hip_valid = valid_mask[11].item()
+    r_hip_valid = valid_mask[12].item()
+    
+    if l_hip_valid and r_hip_valid:
+        root = (norm_pos[11] + norm_pos[12]) / 2.0
+    elif l_hip_valid:
+        root = norm_pos[11]  # Fallback to Left Hip only
+    elif r_hip_valid:
+        root = norm_pos[12]  # Fallback to Right Hip only
+    else:
+        # Emergency Fallback: If both hips are missing, try the Shoulders (5, 6)
+        l_sho_valid = valid_mask[5].item()
+        r_sho_valid = valid_mask[6].item()
+        if l_sho_valid and r_sho_valid:
+            root = (norm_pos[5] + norm_pos[6]) / 2.0
+        else:
+            root = torch.tensor([0.0, 0.0]) # Give up centering, just scale it
+
+    # 3. Apply Centering ONLY to valid points
+    # The -1.0 points remain entirely untouched
+    norm_pos[valid_mask] = norm_pos[valid_mask] - root
+    
+    # 4. Aspect-Preserving Scale ONLY on valid points
+    min_vals = norm_pos[valid_mask].min(dim=0)[0]
+    max_vals = norm_pos[valid_mask].max(dim=0)[0]
+    ranges = max_vals - min_vals
+    global_scale = ranges.max()
+    
+    # Scale valid points. Add epsilon to prevent division by zero
+    norm_pos[valid_mask] = norm_pos[valid_mask] / (global_scale + 1e-6)
+    
+    return norm_pos
+
+# Build input for model -- Normalize ipnut
+def build_input(kp: np.ndarray, W: int, H: int):
+    """
+    kp : (17, 3) pixel coords (x,y,v) -> 34 keypoint, v ignore
+    return ()
+    """
+    # xy = kp[:, :2]
+    xy_tensor = torch.tensor(kp)[:, :2]
+    norm_xy = normalize_coco_posture_safe(xy_tensor.float())
+    # xy[:, 0] /= W
+    # xy[:, 1] /= H
+    # xy = xy.flatten()
+    # return torch.tensor(xy, dtype=torch.float32).unsqueeze(0)
+    return torch.tensor(norm_xy.flatten(), dtype=torch.float32).detach().unsqueeze(0)
+
+# Posture prediction
+def prediction(model, data):
+    """
+    data : torch.FloatTensor (1, 34)
+    Returns (label, confidence_0_to_1).
+    output  — ≥ 0.5 → Good
+    """
+    with torch.inference_mode():
+        output = model(data)
+
+    if output.shape[-1] == 1: # confirm output is ( _ , 1 )
+        prob  = output.item()
+        label = "Good" if prob >= 0.5 else "Bad"
+        conf  = prob if prob >= 0.5 else 1.0 - prob 
+
+    return label, conf
+
+############################ 
+# Generated from Claude
+############################
+# Draw Skeleton on Frame
+def draw_skeleton(frame, kp, label):
+    #Colors
+    GOOD = (50, 220, 100)
+    BAD  = (60,  80, 230)
+    KP   = (255, 210,  50)
+    edge = GOOD if label == "Good" else (BAD if label == "Bad" else (120, 140, 180))
+
+    for i, j in COCO_SKELETON_0_INDEXED:
+        xi, yi, vi = kp[i]; xj, yj, vj = kp[j]
+        if vi > 0.9 and vj > 0.9:
+            cv2.line(frame, (int(xi), int(yi)), (int(xj), int(yj)),
+                     edge, 2, cv2.LINE_AA)
+
+    for x, y, v in kp:
+        if v > 0.9:
+            cv2.circle(frame, (int(x), int(y)), 5, KP, -1, cv2.LINE_AA)
+            cv2.circle(frame, (int(x), int(y)), 5, (0, 0, 0), 1, cv2.LINE_AA)
+############################
+# End
+############################
+
+# Sidebar 
+with st.sidebar:
+    st.markdown("## Sitting Posture Classification")
+    st.divider()
+    # !!!!!!!!!!!!!!! Add ur model path here
+    model_list = [
+        "mlp_batch_model.pth",
+        "mlp_norm_best_model.pth"
+    ]
+    model_path = st.selectbox(
+        "Change model here:",
+        model_list,
+        index=0
+    )
+    # 0 - MLP, 1 - GCN, 2 - 1DCNN, 3 - 
+    index_model = model_list.index(model_path)
+
+# Load models
+model = posture_model = None
+det_err = mdl_err = None
+
+try:
+    model = load_detector()
+except Exception as e:
+    det_err = str(e)
+
+if model_path and os.path.exists(model_path):
+    posture_model = load_posture_model(model_path, index_model)
+else:
+    mdl_err = f"File not found: `{model_path}`"
+
+# Header
+st.markdown("# Sitting Posture Classification")
+st.caption("Real-time sitting posture · Keypoint R-CNN + GCN / 1DCNN / MLP / ?")
+
+if det_err:
+    st.error(f"**Keypoint R-CNN failed:** {det_err}")
+    st.stop()
+
+if mdl_err:
+    st.warning(f"Posture model not loaded — {mdl_err}")
+
+############################ 
+# Generated from Claude
+############################
+# Body
+c1, c2 = st.columns(2)
+if c1.button("Start", width='stretch', type="primary"):
+    st.session_state.update(running=True)
+if c2.button("Stop", width='stretch'):
+    st.session_state.running = False
+
+col_vid, col_panel = st.columns([3, 1], gap="large")
+
+with col_vid:
+    banner     = st.empty()
+    frame_slot = st.empty()
+    banner.markdown(
+        '<div class="status-idle"> Press Start to begin…</div>',
+        unsafe_allow_html=True)
+
+with col_panel:
+    st.markdown("#### Live Info")
+    card_conf = st.empty()
+    st.divider()
+    st.markdown("#### Keypoints (17)")
+    kp_grid_slot = st.empty()
+
+#Session state
+for k, v in [("running", False), ("good", 0), ("bad", 0), ("total", 0)]:
+    st.session_state.setdefault(k, v)
+
+# Webcam 
+if st.session_state.running:
+
+    cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+    frame_n    = 0
+    fps_window = []
+    last_kps   = None
+    last_label = None
+    last_conf  = 0.0
+    last_err   = None
+
+    while st.session_state.running:
+        t0 = time.time()
+
+        ret, frame = cap.read()
+
+        H, W = frame.shape[:2]
+        frame_n += 1
+
+        ############################ 
+        # Coded by NJQ
+        ############################
+        # run R-CNN + classifier every 2 frames
+        if frame_n % 2 == 0:
+            last_err = None
+            img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            kp = extract_keypoint(img, model, device)
+
+            if kp is not None:
+                last_kps = kp
+                if posture_model is not None:
+                    try:
+                        input = build_input(kp, W, H)
+                        input = input.to(device)
+                        lbl, conf  = prediction(posture_model, input)
+                        last_label = lbl
+                        last_conf  = conf
+                    except Exception as e:
+                        last_err   = str(e)
+                        last_label = None
+            else:
+                last_kps   = None
+                last_label = None
+        ############################ 
+        # End
+        ############################
+
+        # Draw overlay
+        vis = frame.copy()
+
+        if last_kps is not None:
+            draw_skeleton(vis, last_kps, last_label)
+            for idx, (x, y, v) in enumerate(last_kps):
+                    if v > 0.9:
+                        cv2.putText(vis, parts[idx],
+                                    (int(x) + 7, int(y) - 5),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.38,
+                                    (200, 210, 230), 1, cv2.LINE_AA)
+
+        if last_label in ("Good", "Bad"):
+            col_bgr = (50, 220, 100) if last_label == "Good" else (60, 80, 230)
+            cv2.putText(vis, f"{last_label}  {last_conf*100:.0f}%",
+                        (20, 50), cv2.FONT_HERSHEY_DUPLEX, 1.3,
+                        col_bgr, 2, cv2.LINE_AA)
+
+        # FPS overlay
+        elapsed = max(time.time() - t0, 1e-6)
+        fps_window.append(1.0 / elapsed)
+        if len(fps_window) > 30: fps_window.pop(0)
+        fps = np.mean(fps_window)
+        cv2.putText(vis, f"{fps:.0f} fps", (W - 110, 36),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (60, 70, 90), 1, cv2.LINE_AA)
+
+        frame_slot.image(
+            cv2.cvtColor(vis, cv2.COLOR_BGR2RGB),
+            channels="RGB", width='stretch'
+        )
+
+        # Banner for status
+        if last_err:
+            banner.markdown(
+                f'<div class="status-idle">Classifier error — see terminal for details</div>',
+                unsafe_allow_html=True)
+        elif last_label == "Good":
+            banner.markdown(
+                '<div class="status-good">Good Posture</div>',
+                unsafe_allow_html=True)
+        elif last_label == "Bad":
+            banner.markdown(
+                '<div class="status-bad">Bad Posture — Adjust your position!</div>',
+                unsafe_allow_html=True)
+        elif last_kps is None:
+            banner.markdown(
+                '<div class="status-idle">No person detected…</div>',
+                unsafe_allow_html=True)
+        else:
+            banner.markdown(
+                '<div class="status-idle">Classifying…</div>',
+                unsafe_allow_html=True)
+
+        # Info cards
+        pct     = last_conf * 100
+        bar_col = ("#22c55e" if last_label == "Good"
+                   else "#ef4444" if last_label == "Bad"
+                   else "#2d3748")
+
+        card_conf.markdown(f"""
+            <div class="card">
+            <div class="card-label">Confidence</div>
+            <div class="card-value">{pct:.1f}%</div>
+            <div class="bar-bg">
+                <div class="bar-fill" style="width:{pct:.0f}%;background:{bar_col};"></div>
+            </div>
+            </div>""", unsafe_allow_html=True
+        )
+
+        # Keypoint chip grid
+        if last_kps is not None:
+            chips = "".join(
+                f'<div class="kp-chip{"  active" if v > 0.9 else ""}">'
+                f'{parts[idx]}<br>'
+                f'<span style="color:#374151">{x:.0f},{y:.0f}</span></div>'
+                for idx, (x, y, v) in enumerate(last_kps)
+            )
+            kp_grid_slot.markdown(
+                f'<div class="kp-grid">{chips}</div>',
+                unsafe_allow_html=True)
+
+        time.sleep(0.005)
+
+    cap.release()
+    banner.markdown(
+        '<div class="status-idle">Stopped.</div>',
+        unsafe_allow_html=True)
+############################ 
+# End
+############################
