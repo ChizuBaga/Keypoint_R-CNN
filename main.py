@@ -151,7 +151,6 @@ def load_posture_model(path: str, index_model: int):
                         nn.Dropout(0.2)
                     )
                     self.outputlayer = nn.Linear(in_features=32, out_features=1)
-                    self.sigmoid = nn.Sigmoid()
 
                 def forward(self, x):
                     """
@@ -308,7 +307,7 @@ def extract_keypoint(img, model, device):
 ############################
 
 ############################ 
-# Coded by 
+# Coded by Dennis
 ############################
 def normalize_coco_posture_safe(pos_tensor):
     """
@@ -404,8 +403,7 @@ def prediction(model, data):
         ############################ 
         # Coded by Pang Jing Thean
         ############################
-        if prob < 0.0 or prob > 1.0:
-            prob = torch.sigmoid(output).item()
+        prob = torch.sigmoid(output).item()
         ############################ 
         # End
         ############################   
