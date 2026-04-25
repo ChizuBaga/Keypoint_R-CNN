@@ -17,7 +17,7 @@ from torch_geometric.data import Data
 from torch_geometric.nn import GCNConv
 
 # CUDA / CPU
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cpu"
 
 # wEB config
 st.set_page_config(
