@@ -53,6 +53,7 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+*.csv
 
 #Own
 sitting-posture-keyjoint-dataset/
