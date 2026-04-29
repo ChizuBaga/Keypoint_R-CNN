@@ -319,10 +319,10 @@ class PostureApp:
         self.fps_window = []
 
         self.model_list = [
-            "MLP.pth",
-            "gcn_model.pth",
-            "1D-CNN.pth",
-            "best_svc_posture_model.pkl"
+            "saved_models/MLP.pth",
+            "saved_models/gcn_model.pth",
+            "saved_models/1D-CNN.pth",
+            "saved_models/best_svc_posture_model.pkl"
         ]
         self.index_model = 0
         self.posture_model = None
